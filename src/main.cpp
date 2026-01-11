@@ -4,11 +4,13 @@
 #include <WiFi.h>
 #include <Arduino.h>
 #include "bidi_switch_knob.h"
+#include <HardwareSerial.h>
 
 const char *HOST = "raspberry.local";
 int PORT = 8010;
 Preferences preferences;
 Automata automata("KNOB_NOM", HOST, PORT);
+HardwareSerial SerialPort(1);
 long d = 8000;
 long st = millis();
 unsigned long startMillis;
@@ -19,6 +21,8 @@ JsonDocument doc;
 // Knob
 #define EXAMPLE_ENCODER_ECA_PIN 19
 #define EXAMPLE_ENCODER_ECB_PIN 22
+#define ESP32_RX 18
+#define ESP32_TX 23
 
 #define SET_BIT(reg, bit) (reg |= ((uint32_t)0x01 << bit))
 #define CLEAR_BIT(reg, bit) (reg &= (~((uint32_t)0x01 << bit)))
@@ -67,7 +71,7 @@ static void user_encoder_loop_task(void *arg)
       if (xSemaphoreTake(mutex, portMAX_DELAY))
       {
         if (encPos > 0)
-          encPos = encPos - 2;
+          encPos = encPos - 5;
         Serial.println("even");
         changeDetected = true;
         xSemaphoreGive(mutex);
@@ -78,9 +82,9 @@ static void user_encoder_loop_task(void *arg)
     {
       if (xSemaphoreTake(mutex, portMAX_DELAY))
       {
-        encPos = encPos + 2;
-        if (encPos > 100)
-          encPos = 100;
+        encPos = encPos + 5;
+        if (encPos > 255)
+          encPos = 255;
         Serial.println("odd");
         changeDetected = true;
         xSemaphoreGive(mutex);
@@ -114,30 +118,37 @@ void setup()
   initKnob();
   preferences.begin("bat", false);
   automata.begin();
+  // automata.addAttribute("encoder1", "Encoder 1", "", "DATA|MAIN");
+  automata.addAttribute("screen", "Screen", "", "DATA|MAIN");
+
   automata.addAttribute("encoder", "Encoder", "", "DATA|MAIN");
-  // automata.addAttribute("battery_volt", "Battery", "", "DATA|MAIN");
-  // automata.addAttribute("upTime", "Up Time", "Hours", "DATA|MAIN");
+  automata.addAttribute("bright", "Brightness", "", "ACTION|MENU|SLIDER", doc);
+  automata.addAttribute("battery_volt", "Battery", "V", "DATA|AUX");
+
 
   automata.registerDevice();
   automata.onActionReceived(action);
   automata.delayedUpdate(sendData);
+  SerialPort.begin(9600, SERIAL_8N1, ESP32_RX, ESP32_TX);
 }
 
 void loop()
 {
   // Serial.println("loop");
   doc["encoder"] = encPos;
+  if (SerialPort.available())
+  {
+    String msg = SerialPort.readStringUntil('\n');
+    Serial.print("Received: ");
+    Serial.println(msg);
+    deserializeJson(doc, msg);
+  }
 
-  // Serial.println("loop");
-  automata.loop();
-
-  if (changeDetected || (millis() - start) > 10000)
+  if (changeDetected || (millis() - start) > 1000)
   {
     automata.sendLive(doc);
     start = millis();
     // Start vibration
     changeDetected = false;
   }
-
-  // delay(200);
 }
